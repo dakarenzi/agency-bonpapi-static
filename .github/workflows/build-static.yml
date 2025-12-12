@@ -1,1 +1,89 @@
+name: Build & Deploy Static agency.bonpapi.com
 
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install wget
+        run: sudo apt-get install -y wget
+
+      - name: Crawl agency.bonpapi.com
+        run: |
+          mkdir -p public
+          wget \
+            --directory-prefix=public \
+            --mirror \
+            --convert-links \
+            --adjust-extension \
+            --page-requisites \
+            --no-parent \
+            --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            --execute robots=off \
+            --exclude-directories=/cdn-cgi/ \
+            --restrict-file-names=windows \
+            --reject-regex "(wp-admin|wp-login|xmlrpc|feed|comments|cart|checkout|my-account)" \
+            https://agency.bonpapi.com
+
+      - name: Organize and Cleanup
+        run: |
+          mv public/agency.bonpapi.com/* public/ 2>/dev/null || true
+          rmdir public/agency.bonpapi.com 2>/dev/null || true
+          find public -name "*\?*" -delete
+          find public -name "*\:*" -delete
+
+      # 1️⃣ Upload for GitHub Pages (compressed snapshot)
+      - name: Upload for GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+      # 2️⃣ Upload raw files for Cloudflare Pages
+      - name: Upload for Cloudflare
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-site-files
+          path: ./public
+
+  deploy_github:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+
+  deploy_cloudflare:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download static artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: static-site-files
+          path: public
+
+      - name: Deploy to Cloudflare Pages
+        run: |
+          npx wrangler pages deploy public \
+            --project-name=agency-bonpapi-static \
+            --branch=main \
+            --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_PAGES_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Echo Success
+        if: success()
+        run: echo "🚀 agency.bonpapi.com deployed successfully to Cloudflare!"
