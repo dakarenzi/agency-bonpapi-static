@@ -18,6 +18,10 @@ jobs:
       - name: Crawl agency.bonpapi.com
         run: |
           mkdir -p public
+          
+          # Disable immediate exit on error
+          set +e
+          
           wget \
             --directory-prefix=public \
             --mirror \
@@ -31,6 +35,19 @@ jobs:
             --restrict-file-names=windows \
             --reject-regex "(wp-admin|wp-login|xmlrpc|feed|comments|cart|checkout|my-account)" \
             https://agency.bonpapi.com
+            
+          # Capture the exit code
+          EXIT_CODE=$?
+          
+          # Logic: If code is 0 (Success) or 8 (Server Error/404), we proceed.
+          # If code is anything else (e.g. 4 Network Error), we fail.
+          if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 8 ]; then
+            echo "::error::Wget failed with critical error code $EXIT_CODE"
+            exit $EXIT_CODE
+          else
+            echo "Wget finished with code $EXIT_CODE. (Code 8 is acceptable for 404s). Proceeding..."
+            exit 0
+          fi
 
       - name: Organize and Cleanup
         run: |
